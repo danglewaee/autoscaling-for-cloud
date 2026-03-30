@@ -167,3 +167,10 @@ python experiments/plot_sanity_check.py ^
   --app APP_ID ^
   --max-points 300
 ```
+
+Aggregate all baseline decision files into one comparison table:
+
+```bash
+python experiments/summarize_results.py ^
+  --result-dir results
+```
