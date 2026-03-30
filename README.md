@@ -174,3 +174,23 @@ Aggregate all baseline decision files into one comparison table:
 python experiments/summarize_results.py ^
   --result-dir results
 ```
+
+Run burst-only comparison across all saved baselines:
+
+```bash
+python experiments/run_burst_analysis.py ^
+  --result-dir results ^
+  --split test
+```
+
+Run a focused sweep for the calibration-aware policy:
+
+```bash
+python experiments/run_risk_sweep.py ^
+  --input data/processed/azure2021/minute_series.csv ^
+  --split test ^
+  --alphas 0.10 ^
+  --underprovision-weights 6,8 ^
+  --oscillation-weights 0.10,0.25 ^
+  --output-csv results/risk_sweep.csv
+```
