@@ -59,6 +59,8 @@ calibration-aware-autoscaling/
     run_moving_average.py
     run_preprocess.py
     run_reactive.py
+  paper/
+    calibration_aware_autoscaling_paper.tex
 ```
 
 ## Current milestone
