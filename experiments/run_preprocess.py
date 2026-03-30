@@ -19,6 +19,12 @@ def main() -> None:
     parser.add_argument("--min-invocations", type=int, default=1000)
     parser.add_argument("--bucket-seconds", type=int, default=60)
     parser.add_argument("--utilization-target", type=float, default=1.0)
+    parser.add_argument(
+        "--capacity-proxy",
+        choices=["avg", "peak"],
+        default="avg",
+        help="Which capacity proxy to expose as required_capacity.",
+    )
     parser.add_argument("--nrows", type=int, default=None)
     args = parser.parse_args()
 
@@ -29,6 +35,7 @@ def main() -> None:
         min_invocations=args.min_invocations,
         bucket_seconds=args.bucket_seconds,
         utilization_target=args.utilization_target,
+        capacity_proxy=args.capacity_proxy,
         nrows=args.nrows,
     )
     print(frame.head(10).to_string(index=False))

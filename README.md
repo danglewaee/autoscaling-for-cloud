@@ -93,7 +93,8 @@ python experiments/run_preprocess.py ^
   --input data/raw/azure2021/invocations.tsv ^
   --output data/processed/azure2021/minute_series.csv ^
   --top-k-apps 10 ^
-  --min-invocations 1000
+  --min-invocations 1000 ^
+  --capacity-proxy avg
 ```
 
 Then build sliding windows with `src/data/make_windows.py` for horizons `5, 10, 15`.
