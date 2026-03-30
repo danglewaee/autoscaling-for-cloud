@@ -11,6 +11,16 @@
 \usepackage{enumitem}
 \usepackage{microtype}
 
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
 \hypersetup{
   colorlinks=true,
   linkcolor=blue,
@@ -56,9 +66,29 @@ Calibration-aware autoscaling can reduce SLA violations and improve the cost-rel
 \end{enumerate}
 
 \section{Problem Formulation and Theoretical Motivation}
-Let $H_t$ denote the observed workload history up to time $t$, and let $D_{t+h}$ denote the random required capacity at forecast horizon $h$. The autoscaling decision is to choose an integer capacity $c_t \in \mathbb{Z}_{\ge 0}$ before $D_{t+h}$ is observed.
+Let $H_t$ denote the observed application-level workload history up to time $t$, and let $D_{t+h} \in \mathbb{Z}_{\ge 0}$ denote the random required capacity at forecast horizon $h$. The autoscaling decision is to choose an integer capacity $c_t \in \mathbb{Z}_{\ge 0}$ before $D_{t+h}$ is observed.
 
-The paper treats autoscaling as a decision problem under predictive uncertainty. A forecasting module produces either a predictive distribution or a point forecast with an uncertainty estimate for $D_{t+h}$. The policy then solves
+\begin{definition}[Autoscaling policy and violation rate]
+An autoscaling policy is a measurable map $\pi$ from histories to capacities, $c_t=\pi(H_t)$. Its one-step underprovision event is $\{D_{t+h}>c_t\}$, and its violation rate is
+\[
+V(\pi)=\mathbb{P}(D_{t+h}>c_t).
+\]
+This is the probabilistic object behind the empirical SLA violation rate reported in the experiments.
+\end{definition}
+
+\begin{definition}[Upper calibration and calibration gap]
+For a nominal tail level $\alpha \in (0,1)$, an upper predictive bound $U_{1-\alpha}(H_t)$ is said to be \emph{$\varepsilon$-upper-calibrated} if
+\[
+\mathbb{P}\!\bigl(D_{t+h} \le U_{1-\alpha}(H_t)\bigr) \ge 1-\alpha-\varepsilon.
+\]
+The ideal case is $\varepsilon=0$. The quantity $\varepsilon$ is the population analogue of the empirical calibration gap used in the experiments.
+\end{definition}
+
+\begin{assumption}[Residual transferability within an application]
+For a fixed application and forecast horizon, the residual distribution estimated on the calibration split is representative of the residual distribution encountered at decision time. This is the population-level assumption behind the residual-based interval construction used in the current implementation.
+\end{assumption}
+
+The paper treats autoscaling as a decision problem under predictive uncertainty. A forecasting module produces either a predictive distribution or a point forecast with an uncertainty estimate for $D_{t+h}$. The decision layer then solves
 \[
 \mathcal{L}_t(c_t) =
 \lambda_c \, c_t
@@ -71,7 +101,8 @@ where $(x)_+ = \max(x,0)$, $\lambda_c > 0$ is the unit provisioning cost, $\lamb
 
 This objective is intentionally simple. It is rich enough to connect predictive uncertainty to downstream decisions, while remaining interpretable and easy to evaluate on a public trace.
 
-\paragraph{Proposition 1 (Quantile rule in the static case).}
+\begin{theorem}[Quantile rule in the static case]
+\label{thm:quantile-rule}
 Consider the special case $\lambda_s = 0$ and assume the demand distribution for $D_{t+h}$ is known exactly. Then any optimizer of
 \[
 \lambda_c \, c + \lambda_u \, \mathbb{E}\!\left[(D_{t+h} - c)_+\right]
@@ -81,8 +112,8 @@ corresponds to a quantile decision rule. In particular, for the continuous ideal
 \alpha = 1 - \frac{\lambda_c}{\lambda_u},
 \qquad \text{provided } 0 < \lambda_c < \lambda_u.
 \]
-
-\paragraph{Proof sketch.}
+\end{theorem}
+\begin{proof}[Proof sketch]
 The derivative of the objective with respect to $c$ is
 \[
 \frac{d}{dc}\mathcal{L}(c)
@@ -90,22 +121,79 @@ The derivative of the objective with respect to $c$ is
 \lambda_c - \lambda_u \, \mathbb{P}(D_{t+h} > c).
 \]
 At optimality, the tail probability balances marginal cost and marginal underprovision penalty, so the solution is a quantile of the demand distribution. This shows that fixed-quantile scaling is not arbitrary: it is the optimizer of a simplified asymmetric-cost decision problem.
+\end{proof}
 
-\paragraph{Why this matters.}
-Proposition 1 gives a clean theoretical interpretation of the fixed-quantile baseline and also clarifies the proposed method: calibration-aware scaling is a generalization of this quantile logic to a setting with uncertainty estimation errors and a temporal smoothness penalty.
+Theorem~\ref{thm:quantile-rule} gives a clean theoretical interpretation of the fixed-quantile baseline and also clarifies the proposed method: calibration-aware scaling is a generalization of this quantile logic to a setting with uncertainty estimation errors and a temporal smoothness penalty.
 
-\paragraph{Proposition 2 (Why calibration matters for decisions).}
-Suppose a policy chooses capacity from a predictive quantile or predictive interval under the intention of enforcing a target tail risk level. If the predictive distribution is miscalibrated, then the realized exceedance probability
+\begin{theorem}[Calibration transfers directly to SLA control]
+\label{thm:calibration-to-sla}
+Let $U_{1-\alpha}(H_t)$ be an $\varepsilon$-upper-calibrated predictive upper bound for $D_{t+h}$, and define the capacity decision
+\[
+c_t = \left\lceil U_{1-\alpha}(H_t) \right\rceil.
+\]
+Then the induced policy $\pi$ satisfies
+\[
+\mathbb{P}(D_{t+h} > c_t) \le \alpha + \varepsilon.
+\]
+\end{theorem}
+\begin{proof}[Proof sketch]
+Because $c_t \ge U_{1-\alpha}(H_t)$ by construction,
+\[
+\{D_{t+h} > c_t\} \subseteq \{D_{t+h} > U_{1-\alpha}(H_t)\}.
+\]
+Taking probabilities and using $\varepsilon$-upper-calibration gives
 \[
 \mathbb{P}(D_{t+h} > c_t)
+\le
+1 - \mathbb{P}\!\bigl(D_{t+h} \le U_{1-\alpha}(H_t)\bigr)
+\le
+\alpha + \varepsilon.
 \]
-can differ substantially from the intended design level. Consequently, the actual cost-reliability operating point can drift away from the one implied by the policy weights or chosen quantile.
+\end{proof}
 
-\paragraph{Interpretation.}
-This proposition is conceptually simple but central to the paper. A fixed P95 policy is only meaningful if the estimated P95 behaves like a true 95th percentile under the data distribution. If calibration is poor, then even a seemingly conservative quantile rule can underperform in downstream scaling. This is the main reason the paper emphasizes calibration quality rather than forecast error alone.
+Theorem~\ref{thm:calibration-to-sla} is the core decision-theoretic reason the paper cares about calibration. A nominal ``P95'' scaling rule only deserves that interpretation if the upper bound is close to a true 95th percentile under the deployed data distribution.
 
-\paragraph{Observation 1 (Role of the oscillation penalty).}
+\begin{proposition}[Miscalibration produces excess violations]
+\label{prop:miscalibration}
+Suppose a policy is intended to operate at tail level $\alpha$, but its realized exceedance probability is $\alpha+\delta$ for some $\delta>0$. Then the policy incurs an additive excess violation rate of $\delta$ relative to its design target. In particular, any downstream SLA-oriented evaluation that depends on the indicator $\mathbf{1}\{D_{t+h}>c_t\}$ inherits that additive degradation directly.
+\end{proposition}
+\begin{proof}
+This is immediate from the identity $\mathbb{E}[\mathbf{1}\{D_{t+h}>c_t\}]=\mathbb{P}(D_{t+h}>c_t)=\alpha+\delta$.
+\end{proof}
+
+\begin{remark}[Conditional calibration matters]
+Global calibration averaged over applications does not imply calibration conditional on a specific application. Since scaling decisions in this paper are made per application, pooled residual calibration can be misleading even when aggregate coverage looks acceptable. This is the theoretical motivation for the app-specific calibration ablation studied later in the paper.
+\end{remark}
+
+\begin{proposition}[Burst-guard envelope guarantee]
+\label{prop:burst-guard}
+Consider a hybrid policy of the form
+\[
+c_t = \max\!\left\{\tilde c_t,\left\lceil \beta \max_{1 \le j \le L} D_{t-j} + b \right\rceil\right\},
+\]
+where $\tilde c_t$ is any base calibration-aware decision, $\beta \ge 1$ is a multiplicative guard factor, $L \ge 1$ is a look-back window, and $b \ge 0$ is a buffer. If the realized next-step demand satisfies
+\[
+D_t \le \beta \max_{1 \le j \le L} D_{t-j} + b,
+\]
+then the policy cannot underprovision at time $t$.
+\end{proposition}
+\begin{proof}
+By construction,
+\[
+c_t \ge \left\lceil \beta \max_{1 \le j \le L} D_{t-j} + b \right\rceil \ge D_t.
+\]
+Hence $D_t > c_t$ is impossible.
+\end{proof}
+
+This proposition is deliberately simple, but it captures the role of the exploratory burst-aware guard introduced in the empirical section: once a burst is partially revealed, a short reactive envelope can protect subsequent minutes of the same burst, at the price of higher oscillation and transient overprovisioning.
+
+\begin{remark}[Role of the oscillation penalty]
 When $\lambda_s > 0$, the policy no longer reduces to a static quantile rule. The optimal decision becomes history dependent through $c_{t-1}$, which creates a direct trade-off between burst responsiveness and scaling stability. This is precisely where a calibration-aware decision policy differs from a naive fixed-quantile baseline.
+\end{remark}
+
+\begin{remark}[Scope of the theoretical claims]
+The current implementation uses empirical residual quantiles rather than a full conformalized construction, so the paper does not claim an exact finite-sample coverage theorem. The role of the theory is narrower and more honest: it formalizes the decision problem, shows how calibration error translates into SLA error, and explains why app-specific calibration and burst-aware guards are natural extensions.
+\end{remark}
 
 \section{Method}
 \subsection{Overview}
@@ -131,7 +219,7 @@ The first implementation uses a simple split-calibration procedure on a validati
     \item to construct calibrated predictive intervals via residual quantiles,
     \item to form a residual-based demand sample set for the downstream decision objective.
 \end{itemize}
-This gives a transparent calibration-aware method before introducing heavier probabilistic models.
+The default implementation pools residuals globally, while one ablation calibrates residuals per application to better align with the app-conditional decision setting emphasized in the theory section. This gives a transparent calibration-aware method before introducing heavier probabilistic models.
 
 \subsection{Decision Layer}
 Let $D_t$ denote the predicted demand distribution at time $t$, and let $c_t$ denote the chosen capacity. The scaling decision minimizes a risk-sensitive objective:
@@ -147,6 +235,8 @@ This formulation balances:
     \item penalty for underprovisioning,
     \item scaling instability or oscillation.
 \end{itemize}
+
+The main method uses the calibrated decision rule directly. An exploratory hybrid variant augments it with a short reactive guard based on recently observed demand. Proposition~\ref{prop:burst-guard} explains the logic of that variant: it is not intended as a separate forecasting model, but as a decision-layer envelope for partially revealed bursts.
 
 \subsection{Data-to-Decision Setup}
 The empirical study uses the Azure Functions Invocation Trace 2021 as a concrete serverless case study. For each application, invocation start times are reconstructed from end timestamps and durations, then aggregated into 1-minute buckets. The phase-1 target is minute-level required capacity, defined from average concurrent demand within each minute. This choice keeps the decision variable close to a practical autoscaling proxy while remaining faithful to the public trace.
