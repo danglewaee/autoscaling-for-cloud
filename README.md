@@ -162,6 +162,23 @@ python experiments/run_risk_calibrated.py ^
   --alpha 0.10
 ```
 
+Try the exploratory burst-aware variant with app-specific calibration and a one-minute reactive guard:
+
+```bash
+python experiments/run_risk_calibrated.py ^
+  --input data/processed/azure2021/minute_series.csv ^
+  --summary-out results/risk_calibrated_guard075_summary.csv ^
+  --decisions-out results/risk_calibrated_guard075_decisions.csv ^
+  --split test ^
+  --history-window 30 ^
+  --horizon 5 ^
+  --alpha 0.10 ^
+  --calibration-scope app ^
+  --min-calibration-samples 200 ^
+  --reactive-guard-lookback 1 ^
+  --reactive-guard-factor 0.75
+```
+
 Generate a sanity-check plot from any decisions CSV:
 
 ```bash

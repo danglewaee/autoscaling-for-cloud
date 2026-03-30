@@ -48,3 +48,34 @@ def fit_residual_interval_calibrator(
         lower_residual=lower_residual,
         upper_residual=upper_residual,
     )
+
+
+def fit_grouped_residual_interval_calibrators(
+    frame: pd.DataFrame,
+    *,
+    group_column: str = "app",
+    min_samples: int = 200,
+    alpha: float = 0.10,
+    target_column: str = "required_capacity",
+    prediction_column: str = "forecast_capacity",
+) -> tuple[dict[str, ResidualIntervalCalibrator], ResidualIntervalCalibrator]:
+    global_calibrator = fit_residual_interval_calibrator(
+        frame,
+        alpha=alpha,
+        target_column=target_column,
+        prediction_column=prediction_column,
+    )
+
+    calibrators: dict[str, ResidualIntervalCalibrator] = {}
+    for group_value, group_frame in frame.groupby(group_column, sort=False):
+        if len(group_frame) < min_samples:
+            continue
+
+        calibrators[str(group_value)] = fit_residual_interval_calibrator(
+            group_frame,
+            alpha=alpha,
+            target_column=target_column,
+            prediction_column=prediction_column,
+        )
+
+    return calibrators, global_calibrator

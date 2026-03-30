@@ -281,6 +281,8 @@ The first empirical round supports several parts of the project's thesis:
 
 At the same time, the current evidence does \emph{not} yet justify a strong claim that the calibration-aware method clearly dominates point-forecast scaling. The next iteration should therefore focus on improving burst-sensitive decision behavior rather than adding a more complicated forecasting model too early.
 
+One exploratory result already points in a plausible direction. A hybrid variant that combines app-specific calibration with a one-minute reactive guard reduces burst-only SLA violation from $0.7885$ to $0.6432$ while also lowering aggregate mean cost from $1.0383$ to $0.8625$. However, it raises mean oscillation from $0.0678$ to $0.1680$, which is too reactive to present as the main method. The takeaway is useful nonetheless: the bottleneck is increasingly in the decision layer, not in the point forecaster itself.
+
 \subsection{Capacity Proxy Ablation: Average vs Peak}
 We also tested a sharper capacity proxy based on per-minute peak concurrency. This is a natural alternative because it should be more sensitive to bursts than average concurrency. However, the first ablation shows that the peak proxy makes the task substantially harsher for all methods and does not currently improve the downstream behavior of the calibration-aware policy.
 
@@ -354,8 +356,8 @@ This ablation changes the interpretation of the next steps. The peak proxy does 
 \begin{enumerate}[leftmargin=1.2cm]
     \item Keep the average-concurrency proxy as the main experimental setting and report peak concurrency only as an ablation.
     \item Explore an intermediate proxy, such as a within-minute high quantile, only if it improves burst behavior without collapsing the aggregate trade-off.
-    \item Improve the decision layer for burst windows before adding a heavier forecasting model.
-    \item Test burst-aware interval inflation or regime-conditioned calibration before adding a heavier forecasting model.
+    \item Refine the hybrid burst-aware guard so that it preserves the current burst-SLA gains without drifting toward reactive-level oscillation.
+    \item Keep tail-risk penalties and app-specific calibration as decision-layer ablations before adding a heavier forecasting model.
 \end{enumerate}
 
 \section{Limitations and Risk Control}

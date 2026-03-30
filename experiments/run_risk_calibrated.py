@@ -16,6 +16,7 @@ from src.baselines.point_forecast import (
     simulate_point_forecast_policy,
 )
 from src.calibration.interval_calibration import fit_residual_interval_calibrator
+from src.calibration.interval_calibration import fit_grouped_residual_interval_calibrators
 from src.calibration.metrics import (
     attach_interval_metrics,
     summarize_interval_metrics,
@@ -53,6 +54,8 @@ def run_risk_calibrated_baseline(
     forecast_config: PointForecastConfig,
     policy_config: RiskCalibratedConfig,
     alpha: float,
+    calibration_scope: str = "global",
+    min_calibration_samples: int = 200,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.Series, pd.Series, pd.Series]:
     train_frame = frame[frame["split"] == "train"].copy()
     model = fit_linear_autoregressive_model(train_frame, config=forecast_config)
@@ -69,14 +72,29 @@ def run_risk_calibrated_baseline(
 
     point_forecast_frame = pd.concat(point_forecast_frames, ignore_index=True)
     calibration_source = point_forecast_frame[point_forecast_frame["split"] == "val"].copy()
-    calibrator = fit_residual_interval_calibrator(calibration_source, alpha=alpha)
+    if calibration_scope == "app":
+        app_calibrators, global_calibrator = fit_grouped_residual_interval_calibrators(
+            calibration_source,
+            alpha=alpha,
+            min_samples=min_calibration_samples,
+        )
+    else:
+        app_calibrators = {}
+        global_calibrator = fit_residual_interval_calibrator(
+            calibration_source,
+            alpha=alpha,
+        )
 
     decisions = []
-    for _, app_frame in point_forecast_frame.groupby("app", sort=False):
+    for app, app_frame in point_forecast_frame.groupby("app", sort=False):
+        calibrator = app_calibrators.get(str(app), global_calibrator)
         simulated = simulate_risk_calibrated_policy(
             app_frame,
             calibrator=calibrator,
             config=policy_config,
+        )
+        simulated["calibration_scope_used"] = (
+            "app" if str(app) in app_calibrators else "global"
         )
         evaluated = attach_scaling_metrics(simulated)
         evaluated = attach_forecast_metrics(evaluated)
@@ -124,12 +142,29 @@ def main() -> None:
     parser.add_argument("--history-window", type=int, default=30)
     parser.add_argument("--horizon", type=int, default=5)
     parser.add_argument("--alpha", type=float, default=0.10)
+    parser.add_argument(
+        "--calibration-scope",
+        default="global",
+        choices=["global", "app"],
+        help="Whether calibration residuals are pooled globally or fitted per app.",
+    )
+    parser.add_argument(
+        "--min-calibration-samples",
+        type=int,
+        default=200,
+        help="Minimum validation residuals required for app-specific calibration.",
+    )
     parser.add_argument("--initial-capacity", type=int, default=1)
     parser.add_argument("--min-capacity", type=int, default=0)
     parser.add_argument("--cost-weight", type=float, default=1.0)
     parser.add_argument("--underprovision-weight", type=float, default=8.0)
     parser.add_argument("--oscillation-weight", type=float, default=0.25)
     parser.add_argument("--candidate-buffer", type=int, default=5)
+    parser.add_argument("--tail-risk-weight", type=float, default=0.0)
+    parser.add_argument("--tail-alpha", type=float, default=0.99)
+    parser.add_argument("--reactive-guard-lookback", type=int, default=0)
+    parser.add_argument("--reactive-guard-factor", type=float, default=1.0)
+    parser.add_argument("--reactive-guard-buffer", type=int, default=0)
     args = parser.parse_args()
 
     frame = pd.read_csv(args.input)
@@ -148,6 +183,11 @@ def main() -> None:
         underprovision_weight=args.underprovision_weight,
         oscillation_weight=args.oscillation_weight,
         candidate_buffer=args.candidate_buffer,
+        tail_risk_weight=args.tail_risk_weight,
+        tail_alpha=args.tail_alpha,
+        reactive_guard_lookback=args.reactive_guard_lookback,
+        reactive_guard_factor=args.reactive_guard_factor,
+        reactive_guard_buffer=args.reactive_guard_buffer,
     )
     (
         decisions_frame,
@@ -162,6 +202,8 @@ def main() -> None:
         forecast_config=forecast_config,
         policy_config=policy_config,
         alpha=args.alpha,
+        calibration_scope=args.calibration_scope,
+        min_calibration_samples=args.min_calibration_samples,
     )
 
     if args.split != "all":
