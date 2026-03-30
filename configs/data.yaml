@@ -1,0 +1,15 @@
+dataset_name: azure_functions_2021
+raw_trace_path: data/raw/azure2021/invocations.tsv
+processed_dir: data/processed/azure2021
+bucket_seconds: 60
+history_minutes: 60
+horizons:
+  - 5
+  - 10
+  - 15
+top_k_apps: 10
+min_invocations: 1000
+train_fraction: 0.70
+val_fraction: 0.15
+target_column: required_capacity
+capacity_utilization_target: 1.0
