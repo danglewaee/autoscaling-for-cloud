@@ -9,6 +9,21 @@ import pandas as pd
 EXPECTED_COLUMNS = ["app", "func", "end_timestamp", "duration"]
 
 
+def _detect_separator(path: str | Path) -> str:
+    with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if "," in line:
+                return ","
+            if "\t" in line:
+                return "\t"
+            return r"\s+"
+
+    raise ValueError(f"Could not detect a delimiter for {path}.")
+
+
 def _normalize_columns(frame: pd.DataFrame) -> pd.DataFrame:
     renamed = {column: column.strip().lower() for column in frame.columns}
     frame = frame.rename(columns=renamed)
@@ -33,7 +48,8 @@ def load_azure_trace(
 ) -> pd.DataFrame:
     """Load the Azure Functions 2021 invocation trace."""
 
-    frame = pd.read_csv(path, sep=r"\s+", engine="python", nrows=nrows)
+    separator = _detect_separator(path)
+    frame = pd.read_csv(path, sep=separator, engine="python", nrows=nrows)
     frame = _normalize_columns(frame)
 
     frame["app"] = frame["app"].astype(str)
