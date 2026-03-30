@@ -53,6 +53,7 @@ calibration-aware-autoscaling/
       case_study_plots.py
   experiments/
     run_fixed_quantile.py
+    run_burst_case_study.py
     plot_sanity_check.py
     run_point_forecast.py
     run_risk_calibrated.py
@@ -196,4 +197,13 @@ python experiments/run_risk_sweep.py ^
   --underprovision-weights 6,8 ^
   --oscillation-weights 0.10,0.25 ^
   --output-csv results/risk_sweep.csv
+```
+
+Generate a burst case-study figure for the paper:
+
+```bash
+python experiments/run_burst_case_study.py ^
+  --result-dir results ^
+  --output paper/figures/burst_case_study.png ^
+  --split test
 ```

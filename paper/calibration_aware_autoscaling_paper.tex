@@ -262,6 +262,15 @@ Risk-calibrated & 1.009 & 0.7885 & 0.0352 \\
 
 These results sharpen the paper's motivation. All current methods still fail badly on burst windows, including the calibration-aware one. However, they fail in different ways: reactive scaling becomes extremely expensive and unstable, while smoothing and fixed-quantile policies remain cheap but miss bursts almost completely. The point-forecast and risk-calibrated policies are the strongest among the current methods on burst windows, yet their SLA violation rates remain far too high. This suggests that the main research opportunity lies not in squeezing small gains from average-case metrics, but in improving burst sensitivity without giving up reproducibility.
 
+Figure~\ref{fig:burst-case-study} makes this failure mode concrete on a representative episode selected automatically from the test split as the burst with the largest total underprovision under the current risk-calibrated policy. Reactive scaling chases the spike only after it arrives, producing large oscillations. The point-forecast and risk-calibrated policies are noticeably smoother, but both still lag the burst peak. The risk-calibrated interval widens around the event, yet not enough to cover the sharpest jump. This is exactly the paper's current empirical takeaway: calibration helps structure the decision problem, but burst robustness still requires a stronger decision rule or a more burst-sensitive uncertainty model.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/burst_case_study.png}
+\caption{Burst case study selected automatically from the test split. The top panel compares realized required capacity against the provisioned capacity chosen by reactive, point-forecast, and risk-calibrated policies. The bottom panel shows the risk-calibrated forecast interval over the same window. All three policies underreact to the sharp spike, but reactive scaling does so with much higher oscillation.}
+\label{fig:burst-case-study}
+\end{figure}
+
 \subsection{Discussion of the First Round}
 The first empirical round supports several parts of the project's thesis:
 \begin{itemize}[leftmargin=1.2cm]
@@ -346,7 +355,7 @@ This ablation changes the interpretation of the next steps. The peak proxy does 
     \item Keep the average-concurrency proxy as the main experimental setting and report peak concurrency only as an ablation.
     \item Explore an intermediate proxy, such as a within-minute high quantile, only if it improves burst behavior without collapsing the aggregate trade-off.
     \item Improve the decision layer for burst windows before adding a heavier forecasting model.
-    \item Add one more figure-level case study that contrasts a burst episode under reactive, point-forecast, and risk-calibrated decisions.
+    \item Test burst-aware interval inflation or regime-conditioned calibration before adding a heavier forecasting model.
 \end{enumerate}
 
 \section{Limitations and Risk Control}
