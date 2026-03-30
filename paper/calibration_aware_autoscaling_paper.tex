@@ -55,6 +55,58 @@ Calibration-aware autoscaling can reduce SLA violations and improve the cost-rel
     \item Forecast accuracy alone is insufficient; poorly calibrated uncertainty can lead to inferior scaling decisions even when point forecast error is low.
 \end{enumerate}
 
+\section{Problem Formulation and Theoretical Motivation}
+Let $H_t$ denote the observed workload history up to time $t$, and let $D_{t+h}$ denote the random required capacity at forecast horizon $h$. The autoscaling decision is to choose an integer capacity $c_t \in \mathbb{Z}_{\ge 0}$ before $D_{t+h}$ is observed.
+
+The paper treats autoscaling as a decision problem under predictive uncertainty. A forecasting module produces either a predictive distribution or a point forecast with an uncertainty estimate for $D_{t+h}$. The policy then solves
+\[
+\mathcal{L}_t(c_t) =
+\lambda_c \, c_t
+\;+\;
+\lambda_u \, \mathbb{E}\!\left[(D_{t+h} - c_t)_+\right]
+\;+\;
+\lambda_s \, |c_t - c_{t-1}|,
+\]
+where $(x)_+ = \max(x,0)$, $\lambda_c > 0$ is the unit provisioning cost, $\lambda_u > 0$ is the underprovision penalty weight, and $\lambda_s > 0$ penalizes oscillatory scaling.
+
+This objective is intentionally simple. It is rich enough to connect predictive uncertainty to downstream decisions, while remaining interpretable and easy to evaluate on a public trace.
+
+\paragraph{Proposition 1 (Quantile rule in the static case).}
+Consider the special case $\lambda_s = 0$ and assume the demand distribution for $D_{t+h}$ is known exactly. Then any optimizer of
+\[
+\lambda_c \, c + \lambda_u \, \mathbb{E}\!\left[(D_{t+h} - c)_+\right]
+\]
+corresponds to a quantile decision rule. In particular, for the continuous idealization, the optimal capacity is an $\alpha$-quantile of $D_{t+h}$ with
+\[
+\alpha = 1 - \frac{\lambda_c}{\lambda_u},
+\qquad \text{provided } 0 < \lambda_c < \lambda_u.
+\]
+
+\paragraph{Proof sketch.}
+The derivative of the objective with respect to $c$ is
+\[
+\frac{d}{dc}\mathcal{L}(c)
+=
+\lambda_c - \lambda_u \, \mathbb{P}(D_{t+h} > c).
+\]
+At optimality, the tail probability balances marginal cost and marginal underprovision penalty, so the solution is a quantile of the demand distribution. This shows that fixed-quantile scaling is not arbitrary: it is the optimizer of a simplified asymmetric-cost decision problem.
+
+\paragraph{Why this matters.}
+Proposition 1 gives a clean theoretical interpretation of the fixed-quantile baseline and also clarifies the proposed method: calibration-aware scaling is a generalization of this quantile logic to a setting with uncertainty estimation errors and a temporal smoothness penalty.
+
+\paragraph{Proposition 2 (Why calibration matters for decisions).}
+Suppose a policy chooses capacity from a predictive quantile or predictive interval under the intention of enforcing a target tail risk level. If the predictive distribution is miscalibrated, then the realized exceedance probability
+\[
+\mathbb{P}(D_{t+h} > c_t)
+\]
+can differ substantially from the intended design level. Consequently, the actual cost-reliability operating point can drift away from the one implied by the policy weights or chosen quantile.
+
+\paragraph{Interpretation.}
+This proposition is conceptually simple but central to the paper. A fixed P95 policy is only meaningful if the estimated P95 behaves like a true 95th percentile under the data distribution. If calibration is poor, then even a seemingly conservative quantile rule can underperform in downstream scaling. This is the main reason the paper emphasizes calibration quality rather than forecast error alone.
+
+\paragraph{Observation 1 (Role of the oscillation penalty).}
+When $\lambda_s > 0$, the policy no longer reduces to a static quantile rule. The optimal decision becomes history dependent through $c_{t-1}$, which creates a direct trade-off between burst responsiveness and scaling stability. This is precisely where a calibration-aware decision policy differs from a naive fixed-quantile baseline.
+
 \section{Method}
 \subsection{Overview}
 The proposed system has three layers:
