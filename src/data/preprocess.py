@@ -94,10 +94,16 @@ def aggregate_minute_series(
         )
         dense = (
             app_frame.set_index("minute")
-            .reindex(minute_index, fill_value=0)
+            .reindex(minute_index)
             .rename_axis("minute")
             .reset_index()
         )
+        dense["arrivals"] = dense["arrivals"].fillna(0).astype(int)
+        dense["active_seconds"] = dense["active_seconds"].fillna(0.0)
+        dense["avg_concurrency"] = dense["active_seconds"] / float(bucket_seconds)
+        dense["required_capacity"] = (
+            dense["avg_concurrency"] / utilization_target
+        ).apply(math.ceil)
         dense["app"] = app
         filled.append(dense)
 

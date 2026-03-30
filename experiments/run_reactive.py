@@ -65,7 +65,6 @@ def main() -> None:
     args = parser.parse_args()
 
     frame = pd.read_csv(args.input)
-    frame = select_split(frame, args.split)
 
     config = ReactivePolicyConfig(
         initial_capacity=args.initial_capacity,
