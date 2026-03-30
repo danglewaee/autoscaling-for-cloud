@@ -150,9 +150,9 @@ We will compare against four baselines:
     \item Calibration stress test: compare residual-calibrated intervals versus fixed-quantile decisions and miscalibrated uncertainty.
 \end{enumerate}
 
-\section{Current Implementation Status and Preliminary Results}
-\subsection{Current Experimental Setup}
-The current codebase has been executed end-to-end on the Azure Functions Invocation Trace 2021. The present setup uses:
+\section{Results}
+\subsection{Experimental Setup}
+The current codebase has been executed end-to-end on the Azure Functions Invocation Trace 2021. The experimental setup uses:
 \begin{itemize}[leftmargin=1.2cm]
     \item the top 10 active applications by invocation volume,
     \item 1-minute aggregation,
@@ -163,7 +163,7 @@ The current codebase has been executed end-to-end on the Azure Functions Invocat
 
 This implementation is intentionally simple and reproducible. It should be viewed as the first end-to-end empirical milestone rather than the final version of the method.
 
-\subsection{Aggregate Test-Split Comparison}
+\subsection{Aggregate Comparison}
 Table~\ref{tab:aggregate-results} summarizes the first aggregate comparison on the test split.
 
 \begin{table}[h]
@@ -183,10 +183,10 @@ Risk-calibrated & 1.038 & 0.0115 & 0.0678 \\
 \end{tabular}
 \end{table}
 
-Two observations already stand out. First, reactive scaling is clearly inferior on aggregate reliability: its SLA violation rate is roughly three times that of the point-forecast and calibration-aware methods. Second, the current risk-calibrated policy is competitive with the point-forecast baseline on aggregate performance, yielding slightly lower mean cost and lower oscillation, but not yet a decisive SLA improvement.
+Two observations already stand out. First, reactive scaling is clearly inferior on aggregate reliability: its SLA violation rate is roughly three times that of the point-forecast and calibration-aware methods. Second, the risk-calibrated policy is competitive with the point-forecast baseline on aggregate performance, yielding slightly lower mean cost and lower oscillation, but not yet a decisive SLA improvement.
 
 \subsection{Calibration Metrics}
-For the current risk-calibrated implementation with nominal coverage $0.90$, the empirical coverage on the test split is $0.8793$, with calibration gap $0.0207$ and average interval width $0.8972$. This is close enough to support the decision layer meaningfully, but it also shows that calibration is not yet perfect.
+For the risk-calibrated implementation with nominal coverage $0.90$, the empirical coverage on the test split is $0.8793$, with calibration gap $0.0207$ and average interval width $0.8972$. This is close enough to support the decision layer meaningfully, but it also shows that calibration is not yet perfect.
 
 \subsection{Burst-Only Evaluation}
 Aggregate performance is not the full story. We therefore isolate burst windows using a rolling-baseline detector and compare methods only on those windows. In the current test split, burst windows make up only about $1.23\%$ of all decision steps, but they are much harder than the average case.
@@ -210,7 +210,7 @@ Risk-calibrated & 1.009 & 0.7885 & 0.0352 \\
 
 These results sharpen the paper's motivation. All current methods still fail badly on burst windows, including the calibration-aware one. However, they fail in different ways: reactive scaling becomes extremely expensive and unstable, while smoothing and fixed-quantile policies remain cheap but miss bursts almost completely. The point-forecast and risk-calibrated policies are the strongest among the current methods on burst windows, yet their SLA violation rates remain far too high. This suggests that the main research opportunity lies not in squeezing small gains from average-case metrics, but in improving burst sensitivity without giving up reproducibility.
 
-\subsection{Interpretation of the First Results}
+\subsection{Discussion of the First Round}
 The first empirical round supports several parts of the project's thesis:
 \begin{itemize}[leftmargin=1.2cm]
     \item reactive autoscaling is not competitive on this trace,
@@ -218,7 +218,7 @@ The first empirical round supports several parts of the project's thesis:
     \item burst-only analysis reveals weaknesses that aggregate metrics can hide.
 \end{itemize}
 
-At the same time, the current evidence does \emph{not} yet justify a strong claim that the calibration-aware method clearly dominates point-forecast scaling. The next iteration should therefore focus on sharpening the capacity target proxy and rerunning the burst analysis, rather than adding a more complicated forecasting model too early.
+At the same time, the current evidence does \emph{not} yet justify a strong claim that the calibration-aware method clearly dominates point-forecast scaling. The next iteration should therefore focus on improving burst-sensitive decision behavior rather than adding a more complicated forecasting model too early.
 
 \subsection{Capacity Proxy Ablation: Average vs Peak}
 We also tested a sharper capacity proxy based on per-minute peak concurrency. This is a natural alternative because it should be more sensitive to bursts than average concurrency. However, the first ablation shows that the peak proxy makes the task substantially harsher for all methods and does not currently improve the downstream behavior of the calibration-aware policy.
@@ -237,7 +237,7 @@ Peak concurrency & 1.179 & 0.0301 & 0.2195 & 0.9078 & 0.0225 & 0.8558 \\
 \end{tabular}
 \end{table}
 
-This ablation changes the interpretation of the next steps. The peak proxy does improve empirical coverage slightly, but it worsens cost, aggregate SLA violations, and burst-only SLA violations for the current policy. In other words, simply making the target sharper is not enough. For the paper, the average-concurrency proxy should remain the primary setup, while the peak proxy serves as a useful negative-result ablation that highlights the need for better burst-sensitive decision logic.
+This ablation changes the interpretation of the next steps. The peak proxy does improve empirical coverage slightly, but it worsens cost, aggregate SLA violations, and burst-only SLA violations for the current policy. In other words, simply making the target sharper is not enough. For this paper, the average-concurrency proxy should remain the primary setup, while the peak proxy serves as a useful negative-result ablation that highlights the need for better burst-sensitive decision logic.
 
 \section{Expected Contributions}
 \begin{enumerate}[leftmargin=1.2cm]
@@ -294,7 +294,7 @@ This ablation changes the interpretation of the next steps. The peak proxy does 
     \item Keep the average-concurrency proxy as the main experimental setting and report peak concurrency only as an ablation.
     \item Explore an intermediate proxy, such as a within-minute high quantile, only if it improves burst behavior without collapsing the aggregate trade-off.
     \item Improve the decision layer for burst windows before adding a heavier forecasting model.
-    \item Extend the paper draft with a formal results section based on the current aggregate, burst-only, and proxy-ablation tables.
+    \item Add one more figure-level case study that contrasts a burst episode under reactive, point-forecast, and risk-calibrated decisions.
 \end{enumerate}
 
 \section{Limitations and Risk Control}
