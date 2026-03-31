@@ -52,6 +52,13 @@ Calibration-aware autoscaling can reduce SLA violations and improve the cost-rel
 
 Our contributions are threefold. First, we formulate autoscaling as a calibration-sensitive decision problem and make explicit how calibration error translates into downstream SLA error. Second, we instantiate this idea with a lightweight residual-calibrated policy that can be reproduced on a public serverless trace without a large forecasting stack. Third, we provide an empirical analysis that separates aggregate behavior from burst-only behavior, which reveals a decision-layer failure mode that average metrics alone would hide.
 
+\section{Related Work}
+Autoscaling in cloud systems has long been studied from both reactive and predictive perspectives. Early predictive systems used workload forecasting and limited-horizon control to provision resources ahead of demand variation \cite{roy2011efficient,gandhi2014adaptive}. More recent work has explored learning-based controllers, including reinforcement learning in production environments \cite{qiu2023aware}. Our work is narrower in scope than these systems papers: rather than proposing a richer controller stack, it asks whether uncertainty calibration itself changes the cost-reliability operating point of autoscaling decisions.
+
+A second thread of work studies predictive calibration and interval construction. Guo et al.\ showed that modern predictors can be poorly calibrated even when they are accurate in the aggregate \cite{guo2017calibration}. Conformal prediction provides a general route to coverage-controlled prediction sets under exchangeability \cite{shafer2008tutorial}, and subsequent work has adapted these ideas to sequential and time-series settings \cite{xu2021conformal}. Our method is motivated by this literature, but it intentionally stops short of a full conformal wrapper: the current goal is to isolate the decision consequences of lightweight residual calibration on a public serverless trace.
+
+The closest conceptual overlap lies in decision-aware use of predictive uncertainty. Much of the autoscaling literature evaluates forecast error, utilization, or controller reward; by contrast, our emphasis is on the translation from calibration error to SLA error, and on the empirical fact that burst-only windows reveal failure modes that aggregate metrics can hide. This is also why the paper studies an exploratory hybrid guard: the current evidence suggests that the main unresolved difficulty lies in the decision layer, not only in the forecaster.
+
 \section{Problem Formulation and Theoretical Motivation}
 Let $H_t$ denote the observed application-level workload history up to time $t$, and let $D_{t+h} \in \mathbb{Z}_{\ge 0}$ denote the random required capacity at forecast horizon $h$. The autoscaling decision is to choose an integer capacity $c_t \in \mathbb{Z}_{\ge 0}$ before $D_{t+h}$ is observed.
 
@@ -183,6 +190,7 @@ The current implementation uses empirical residual quantiles rather than a full 
 \end{remark}
 
 \section{Method}
+\label{sec:method}
 \subsection{Overview}
 The proposed framework has three layers:
 \begin{enumerate}[leftmargin=1.2cm]
@@ -359,5 +367,71 @@ Future work should therefore prioritize method refinement over scope expansion. 
 
 \section{Conclusion}
 This paper studies autoscaling as a risk-sensitive decision problem rather than a pure forecasting problem. The theory section shows why calibration error translates directly into SLA error, and the empirical study shows that average-case forecasting accuracy alone is not enough to characterize scaling quality. On the Azure Functions 2021 trace, calibration-aware scaling is competitive on aggregate metrics, while burst-only evaluation reveals that the main remaining bottleneck lies in the decision layer. Taken together, these results support the paper's central claim: predictive uncertainty is useful for autoscaling only when it is calibrated and coupled to an appropriate decision rule.
+
+\appendix
+\section{Appendix: Proof Sketches and Implementation Mapping}
+\subsection{Expanded Proof Sketch for Theorem~\ref{thm:quantile-rule}}
+Let
+\[
+J(c) = \lambda_c c + \lambda_u \, \mathbb{E}[(D-c)_+]
+\]
+in the static case, where $D$ abbreviates $D_{t+h}$. Under a continuous demand distribution with density $f_D$, differentiation under the integral gives
+\[
+\frac{d}{dc}\mathbb{E}[(D-c)_+] = -\mathbb{P}(D>c).
+\]
+Hence
+\[
+J'(c)=\lambda_c-\lambda_u \mathbb{P}(D>c).
+\]
+Setting $J'(c)=0$ yields $\mathbb{P}(D>c)=\lambda_c/\lambda_u$, or equivalently
+\[
+\mathbb{P}(D \le c)=1-\frac{\lambda_c}{\lambda_u}.
+\]
+Thus the optimizer is a demand quantile. The discrete-capacity implementation used in the experiments is the integer analogue of this argument.
+
+\subsection{Expanded Proof Sketch for Theorem~\ref{thm:calibration-to-sla}}
+The theorem is a one-line decision consequence of upper calibration, but it is worth making the logic explicit. If $U_{1-\alpha}(H_t)$ is a valid upper bound, then choosing capacity at or above that bound ensures that any SLA violation must also be a failure of the upper bound itself. The deployed policy therefore inherits the same tail error rate, up to the calibration gap $\varepsilon$. This is precisely why the paper treats calibration metrics as decision-relevant rather than merely descriptive.
+
+\subsection{Implementation Mapping}
+The implementation corresponding to the main method in the paper has four steps:
+\begin{enumerate}[leftmargin=1.2cm]
+    \item fit a linear autoregressive model on the training split,
+    \item compute residuals on the validation split,
+    \item construct a residual-based interval and scenario set for each decision time,
+    \item enumerate candidate capacities and choose the one minimizing the objective in Section~\ref{sec:method}.
+\end{enumerate}
+In the current experiments, the main setting uses a 30-minute history window, a 5-minute forecast horizon, nominal coverage $0.90$, and decision weights $(\lambda_c,\lambda_u,\lambda_s)=(1,8,0.25)$. These values should be read as the first stable operating point of the pipeline rather than as tuned final hyperparameters.
+
+\begin{thebibliography}{99}
+\bibitem{roy2011efficient}
+Nilabja Roy, Abhishek Dubey, and Aniruddha S. Gokhale.
+\newblock Efficient autoscaling in the cloud using predictive models for workload forecasting.
+\newblock In {\em 2011 IEEE 4th International Conference on Cloud Computing (CLOUD)}, pages 500--507, 2011.
+
+\bibitem{gandhi2014adaptive}
+Anshul Gandhi, Parijat Dube, Alexei Karve, Andrzej Kochut, and Li Zhang.
+\newblock Adaptive, model-driven autoscaling for cloud applications.
+\newblock In {\em 11th International Conference on Autonomic Computing (ICAC 14)}, pages 57--64, 2014.
+
+\bibitem{qiu2023aware}
+Haoran Qiu, Weichao Mao, Chen Wang, Hubertus Franke, Alaa Youssef, Zbigniew T. Kalbarczyk, Tamer Basar, and Ravishankar K. Iyer.
+\newblock {AWARE}: Automate workload autoscaling with reinforcement learning in production cloud systems.
+\newblock In {\em 2023 USENIX Annual Technical Conference (USENIX ATC 23)}, pages 387--402, 2023.
+
+\bibitem{guo2017calibration}
+Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger.
+\newblock On calibration of modern neural networks.
+\newblock In {\em Proceedings of the 34th International Conference on Machine Learning}, volume 70 of {\em Proceedings of Machine Learning Research}, pages 1321--1330, 2017.
+
+\bibitem{shafer2008tutorial}
+Glenn Shafer and Vladimir Vovk.
+\newblock A tutorial on conformal prediction.
+\newblock {\em Journal of Machine Learning Research}, 9:371--421, 2008.
+
+\bibitem{xu2021conformal}
+Chen Xu and Yao Xie.
+\newblock Conformal prediction interval for dynamic time-series.
+\newblock In {\em Proceedings of the 38th International Conference on Machine Learning}, volume 139 of {\em Proceedings of Machine Learning Research}, pages 11559--11569, 2021.
+\end{thebibliography}
 
 \end{document}
