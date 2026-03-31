@@ -50,20 +50,7 @@ Given historical application-level invocation traces and a short prediction hori
 \paragraph{Thesis.}
 Calibration-aware autoscaling can reduce SLA violations and improve the cost-reliability trade-off under bursty serverless workloads, and the quality of uncertainty calibration is itself a key determinant of downstream scaling quality.
 
-\section{Research Questions and Hypotheses}
-\subsection{Research Questions}
-\begin{enumerate}[label=RQ\arabic*., leftmargin=1.2cm]
-    \item Can calibrated predictive uncertainty improve autoscaling decisions under bursty serverless workloads compared with reactive and point-forecast baselines?
-    \item Does calibration quality materially affect downstream scaling quality, beyond standard forecasting accuracy metrics such as MAE or RMSE?
-    \item Under which workload regimes (stable, periodic, bursty, drifting) does calibration-aware autoscaling provide the largest benefit?
-\end{enumerate}
-
-\subsection{Hypotheses}
-\begin{enumerate}[label=H\arabic*., leftmargin=1.2cm]
-    \item Calibration-aware autoscaling reduces SLA violations relative to reactive autoscaling under bursty serverless workloads.
-    \item Calibration-aware autoscaling achieves a better cost-reliability trade-off than point-forecast-based autoscaling.
-    \item Forecast accuracy alone is insufficient; poorly calibrated uncertainty can lead to inferior scaling decisions even when point forecast error is low.
-\end{enumerate}
+Our contributions are threefold. First, we formulate autoscaling as a calibration-sensitive decision problem and make explicit how calibration error translates into downstream SLA error. Second, we instantiate this idea with a lightweight residual-calibrated policy that can be reproduced on a public serverless trace without a large forecasting stack. Third, we provide an empirical analysis that separates aggregate behavior from burst-only behavior, which reveals a decision-layer failure mode that average metrics alone would hide.
 
 \section{Problem Formulation and Theoretical Motivation}
 Let $H_t$ denote the observed application-level workload history up to time $t$, and let $D_{t+h} \in \mathbb{Z}_{\ge 0}$ denote the random required capacity at forecast horizon $h$. The autoscaling decision is to choose an integer capacity $c_t \in \mathbb{Z}_{\ge 0}$ before $D_{t+h}$ is observed.
@@ -197,113 +184,86 @@ The current implementation uses empirical residual quantiles rather than a full 
 
 \section{Method}
 \subsection{Overview}
-The proposed system has three layers:
+The proposed framework has three layers:
 \begin{enumerate}[leftmargin=1.2cm]
     \item \textbf{Forecasting layer:} predicts short-horizon demand and produces predictive uncertainty.
     \item \textbf{Calibration layer:} adjusts uncertainty estimates so that predictive intervals better match empirical coverage.
     \item \textbf{Decision layer:} converts the calibrated demand distribution into a scaling decision using an explicit cost-risk objective.
 \end{enumerate}
+The implementation is intentionally lightweight so that downstream differences can be attributed mainly to calibration and decision logic rather than to predictor scale.
 
-\subsection{Forecasting Layer}
-We will compare a small set of forecasters to avoid unnecessary complexity:
-\begin{itemize}[leftmargin=1.2cm]
-    \item Naive / moving-average baseline
-    \item One point-forecast baseline based on linear autoregression
-    \item One neural baseline (e.g., LSTM or TCN), only after simpler baselines are stable
-    \item One probabilistic forecaster producing quantiles or predictive intervals
-\end{itemize}
+\subsection{Forecasting Model}
+For each application we construct a minute-level required-capacity sequence $\{y_t\}_{t=1}^T$. Given a history window of length $m$ and forecast horizon $h$, the forecasting module predicts
+\[
+\hat y_{t+h} = f_{\theta}(y_{t-m+1}, \ldots, y_t).
+\]
+In the current implementation, $f_\theta$ is a linear autoregressive model. This choice is deliberate: it keeps the predictor simple enough that changes in downstream performance can be attributed mainly to calibration and decision logic rather than to model scale.
 
 \subsection{Calibration Layer}
-The first implementation uses a simple split-calibration procedure on a validation split. A point-forecast model is trained on the training partition, then its residuals on the validation partition are collected to form an empirical error distribution. These residuals are used in two ways:
-\begin{itemize}[leftmargin=1.2cm]
-    \item to construct calibrated predictive intervals via residual quantiles,
-    \item to form a residual-based demand sample set for the downstream decision objective.
-\end{itemize}
-The default implementation pools residuals globally, while one ablation calibrates residuals per application to better align with the app-conditional decision setting emphasized in the theory section. This gives a transparent calibration-aware method before introducing heavier probabilistic models.
+Let $\mathcal{I}_{\mathrm{cal}}$ denote the calibration split and define residuals
+\[
+r_i = y_i - \hat y_i, \qquad i \in \mathcal{I}_{\mathrm{cal}}.
+\]
+The method uses the empirical residual distribution in two ways. First, it forms a calibrated interval
+\[
+\bigl[\ell_{t+h}, u_{t+h}\bigr]
+=
+\Bigl[
+\max(0,\hat y_{t+h}+q_{\alpha/2}(R)),
+\max(0,\hat y_{t+h}+q_{1-\alpha/2}(R))
+\Bigr],
+\]
+where $R=\{r_i : i\in\mathcal{I}_{\mathrm{cal}}\}$ and $q_p(R)$ denotes the empirical $p$-quantile of the residual set. Second, it forms a scenario set for downstream decisions,
+\[
+\mathcal{S}_{t+h} = \{\max(\hat y_{t+h}+r,0): r \in R\}.
+\]
+The default configuration pools residuals globally. A second ablation replaces $R$ with an application-specific residual set $R_a$ to better align calibration with per-application deployment.
 
 \subsection{Decision Layer}
-Let $D_t$ denote the predicted demand distribution at time $t$, and let $c_t$ denote the chosen capacity. The scaling decision minimizes a risk-sensitive objective:
+Given the scenario set $\mathcal{S}_{t+h}$ and previous capacity $c_{t-1}$, the calibration-aware policy chooses
 \[
-\mathcal{L}(c_t) = \lambda_1 \cdot \mathrm{Cost}(c_t)
-+ \lambda_2 \cdot \mathbb{E}[\mathrm{UnderProvisionPenalty}(D_t, c_t)]
-+ \lambda_3 \cdot |c_t - c_{t-1}|.
+\hat c_t
+=
+\arg\min_{c \in \mathbb{Z}_{\ge 0}}
+\left[
+\lambda_c c
+\;+\;
+\lambda_u \frac{1}{|\mathcal{S}_{t+h}|} \sum_{s \in \mathcal{S}_{t+h}} (s-c)_+
+\;+\;
+\lambda_s |c-c_{t-1}|
+\right].
 \]
+This objective balances provisioning cost, expected underprovision under calibrated demand scenarios, and temporal smoothness. The candidate set is discrete, so the implementation solves the objective by enumeration over a bounded integer range.
 
-This formulation balances:
-\begin{itemize}[leftmargin=1.2cm]
-    \item provisioning cost,
-    \item penalty for underprovisioning,
-    \item scaling instability or oscillation.
-\end{itemize}
+\subsection{Exploratory Hybrid Variant}
+The main method uses $\hat c_t$ directly. An exploratory variant augments it with a short reactive guard,
+\[
+c_t^{\mathrm{hyb}} = \max\!\left\{\hat c_t,\left\lceil \beta \max_{1 \le j \le L} y_{t-j} + b \right\rceil\right\},
+\]
+where $L$ is a short look-back horizon, $\beta$ is a multiplicative guard factor, and $b$ is an additive buffer. Proposition~\ref{prop:burst-guard} explains the theoretical motivation for this construction: it is a decision-layer envelope for partially revealed bursts rather than a separate forecasting model.
 
-The main method uses the calibrated decision rule directly. An exploratory hybrid variant augments it with a short reactive guard based on recently observed demand. Proposition~\ref{prop:burst-guard} explains the logic of that variant: it is not intended as a separate forecasting model, but as a decision-layer envelope for partially revealed bursts.
-
-\subsection{Data-to-Decision Setup}
-The empirical study uses the Azure Functions Invocation Trace 2021 as a concrete serverless case study. For each application, invocation start times are reconstructed from end timestamps and durations, then aggregated into 1-minute buckets. The phase-1 target is minute-level required capacity, defined from average concurrent demand within each minute. This choice keeps the decision variable close to a practical autoscaling proxy while remaining faithful to the public trace.
-
-\subsection{Why this method is publishable}
-The novelty is not merely ``use a better model.'' The paper focuses on three deeper claims:
-\begin{enumerate}[leftmargin=1.2cm]
-    \item uncertainty should be calibrated before it is trusted for scaling,
-    \item decision quality depends on calibration, not only point accuracy,
-    \item bursty regimes expose the weaknesses of reactive and point-forecast policies more clearly than aggregate metrics do.
-\end{enumerate}
-
-\section{Experimental Plan}
-\subsection{Dataset Strategy}
-Start with \textbf{one public workload trace} only. This keeps the scope realistic for a first paper. We use the \textbf{Azure Functions Invocation Trace 2021} as the sole dataset. The study aggregates invocations at the application level, uses 1-minute buckets, and predicts required capacity at horizons of 5, 10, and 15 minutes.
+\section{Experimental Setup}
+\subsection{Dataset and Preprocessing}
+The empirical study uses the Azure Functions Invocation Trace 2021 as a public serverless case study. For each invocation, start time is reconstructed from the released end timestamp and duration, after which the trace is aggregated at the application level into 1-minute buckets. The main target is minute-level required capacity derived from average concurrent demand within each minute. The primary setup keeps the top 10 most active applications, uses chronological train/validation/test splits of 70/15/15, and evaluates a 5-minute forecast horizon in the first round.
 
 \subsection{Baselines}
-We will compare against four baselines:
+We compare the proposed method against four baselines:
 \begin{enumerate}[leftmargin=1.2cm]
-    \item Reactive threshold autoscaling
-    \item Moving-average forecast + scaling decision
-    \item Linear autoregressive point-forecast scaling
-    \item Fixed-quantile scaling (e.g., rolling P90 or P95)
+    \item reactive threshold autoscaling,
+    \item moving-average forecast with scaling,
+    \item linear autoregressive point-forecast scaling,
+    \item fixed-quantile scaling at level $0.95$.
 \end{enumerate}
+These baselines cover the main design families that the paper aims to separate: reactive control, smoothing heuristics, point-forecast-driven control, and quantile-based uncertainty heuristics.
 
-\subsection{Evaluation Metrics}
-\paragraph{Forecasting metrics}
-\begin{itemize}[leftmargin=1.2cm]
-    \item MAE / RMSE
-    \item Pinball loss (for quantile forecasts)
-\end{itemize}
+\subsection{Metrics}
+Forecast quality is measured by MAE and RMSE, with pinball loss for the fixed-quantile baseline. Calibration quality is measured by empirical coverage, calibration gap, and average interval width. Downstream scaling quality is measured by mean provisioning cost, SLA violation rate, underprovision, overprovision, and oscillation.
 
-\paragraph{Calibration metrics}
-\begin{itemize}[leftmargin=1.2cm]
-    \item Empirical coverage
-    \item Calibration gap
-    \item Average interval width
-\end{itemize}
-
-\paragraph{Downstream scaling metrics}
-\begin{itemize}[leftmargin=1.2cm]
-    \item Provisioning cost
-    \item SLA violation rate
-    \item Underprovision ratio
-    \item Scaling frequency / oscillation
-\end{itemize}
-
-\subsection{Core Experiments}
-\begin{enumerate}[leftmargin=1.2cm]
-    \item Full comparison across all methods on the test split.
-    \item Burst-only evaluation on windows with sharp demand spikes.
-    \item Ablation over forecast horizon, confidence level, and penalty weights.
-    \item Calibration stress test: compare residual-calibrated intervals versus fixed-quantile decisions and miscalibrated uncertainty.
-\end{enumerate}
+\subsection{Evaluation Protocol}
+The empirical evaluation has four components. First, we compare all methods on the full test split. Second, we isolate burst windows using a rolling-baseline detector and evaluate each policy only on those windows. Third, we study an alternative capacity proxy based on per-minute peak concurrency to test whether a sharper target changes the conclusions. Fourth, we report an exploratory hybrid-guard ablation to understand whether the main bottleneck lies in uncertainty estimation or in the decision layer.
 
 \section{Results}
-\subsection{Experimental Setup}
-The current codebase has been executed end-to-end on the Azure Functions Invocation Trace 2021. The experimental setup uses:
-\begin{itemize}[leftmargin=1.2cm]
-    \item the top 10 active applications by invocation volume,
-    \item 1-minute aggregation,
-    \item a required-capacity proxy derived from average concurrent demand per minute as the main configuration,
-    \item chronological train/validation/test splits with proportions 70/15/15,
-    \item a 5-minute forecast horizon for the first round of experiments.
-\end{itemize}
-
-This implementation is intentionally simple and reproducible. It should be viewed as the first end-to-end empirical milestone rather than the final version of the method.
+The current codebase has been executed end-to-end under the setup described above. The results should be interpreted as a first full empirical pass on the public trace rather than as the final optimized version of the method.
 
 \subsection{Aggregate Comparison}
 Table~\ref{tab:aggregate-results} summarizes the first aggregate comparison on the test split.
@@ -392,68 +352,12 @@ Peak concurrency & 1.179 & 0.0301 & 0.2195 & 0.9078 & 0.0225 & 0.8558 \\
 
 This ablation changes the interpretation of the next steps. The peak proxy does improve empirical coverage slightly, but it worsens cost, aggregate SLA violations, and burst-only SLA violations for the current policy. In other words, simply making the target sharper is not enough. For this paper, the average-concurrency proxy should remain the primary setup, while the peak proxy serves as a useful negative-result ablation that highlights the need for better burst-sensitive decision logic.
 
-\section{Expected Contributions}
-\begin{enumerate}[leftmargin=1.2cm]
-    \item A calibration-aware autoscaling framework for bursty workloads.
-    \item Evidence that calibration quality directly affects autoscaling quality.
-    \item A reproducible empirical comparison against standard autoscaling baselines.
-    \item A public research artifact: paper, code, and plots.
-\end{enumerate}
+\section{Limitations and Future Work}
+This study has several limitations. First, the current calibration layer is residual-based rather than fully conformalized, so the paper argues from population-level calibration logic instead of claiming exact finite-sample validity. Second, the empirical study uses one public serverless trace and a primary average-concurrency proxy, which is enough for a focused first paper but not yet enough for broad generalization claims across cloud settings. Third, the exploratory hybrid guard improves burst-only SLA but increases oscillation, which confirms that burst robustness is still an open decision-layer problem rather than a solved component.
 
-\section{Concrete Implementation Roadmap}
-\subsection{Phase 1: Scope Lock (Days 1--3)}
-\begin{itemize}[leftmargin=1.2cm]
-    \item Finalize title, problem statement, and success criteria.
-    \item Lock Azure Functions 2021 as the only dataset.
-    \item Define the exact prediction target as minute-level required capacity and set horizons to 5, 10, and 15 minutes.
-    \item Create the repository structure: \texttt{data/}, \texttt{src/}, \texttt{experiments/}, \texttt{plots/}, \texttt{paper/}.
-\end{itemize}
-
-\subsection{Phase 2: Data Pipeline (Days 4--7)}
-\begin{itemize}[leftmargin=1.2cm]
-    \item Load and inspect the trace.
-    \item Reconstruct invocation start timestamps and aggregate by application.
-    \item Create train/validation/test splits by time.
-    \item Build a sliding-window time-series dataset.
-    \item Define a burst-detection rule for analysis.
-\end{itemize}
-
-\subsection{Phase 3: Baselines (Week 2)}
-\begin{itemize}[leftmargin=1.2cm]
-    \item Implement reactive threshold scaling.
-    \item Implement smoothing-based forecast baseline.
-    \item Implement point-forecast baseline.
-    \item Run the first end-to-end experiment and verify that metrics and plots work.
-\end{itemize}
-
-\subsection{Phase 4: Proposed Method (Weeks 3--4)}
-\begin{itemize}[leftmargin=1.2cm]
-    \item Implement split-residual calibration for predictive intervals.
-    \item Implement the risk-calibrated decision policy.
-    \item Compare against fixed-quantile scaling.
-    \item Add a heavier probabilistic forecaster only if the simpler pipeline is stable.
-\end{itemize}
-
-\subsection{Phase 5: Evaluation and Writing (Weeks 5--8)}
-\begin{itemize}[leftmargin=1.2cm]
-    \item Run core experiments.
-    \item Produce the main figures and result tables.
-    \item Write Introduction, Method, Experimental Setup, and Results.
-    \item Release code, finalize the paper PDF, and prepare an arXiv or workshop-ready version.
-\end{itemize}
-
-\section{Immediate Next Actions}
-\begin{enumerate}[leftmargin=1.2cm]
-    \item Keep the average-concurrency proxy as the main experimental setting and report peak concurrency only as an ablation.
-    \item Explore an intermediate proxy, such as a within-minute high quantile, only if it improves burst behavior without collapsing the aggregate trade-off.
-    \item Refine the hybrid burst-aware guard so that it preserves the current burst-SLA gains without drifting toward reactive-level oscillation.
-    \item Keep tail-risk penalties and app-specific calibration as decision-layer ablations before adding a heavier forecasting model.
-\end{enumerate}
-
-\section{Limitations and Risk Control}
-This paper intentionally avoids reinforcement learning, large-scale cluster simulation, and broad cloud optimization claims. The goal is a focused, reproducible first publication rather than a large, multi-component systems project. The main risk is scope creep; the primary mitigation is to commit to one dataset, a small set of baselines, and a narrow decision objective.
+Future work should therefore prioritize method refinement over scope expansion. The most valuable next steps are to make the burst-aware guard more selective, test intermediate capacity proxies between average and peak concurrency, and then revisit stronger forecasters only after the decision layer is stable.
 
 \section{Conclusion}
-This project treats autoscaling as a risk-sensitive decision problem rather than a pure forecasting problem. Its central claim is simple but meaningful: uncertainty is useful for scaling only when it is calibrated well enough to support downstream decisions. If validated empirically, this insight would make the project strong enough for a first public paper while remaining realistic for a focused student effort.
+This paper studies autoscaling as a risk-sensitive decision problem rather than a pure forecasting problem. The theory section shows why calibration error translates directly into SLA error, and the empirical study shows that average-case forecasting accuracy alone is not enough to characterize scaling quality. On the Azure Functions 2021 trace, calibration-aware scaling is competitive on aggregate metrics, while burst-only evaluation reveals that the main remaining bottleneck lies in the decision layer. Taken together, these results support the paper's central claim: predictive uncertainty is useful for autoscaling only when it is calibrated and coupled to an appropriate decision rule.
 
 \end{document}
