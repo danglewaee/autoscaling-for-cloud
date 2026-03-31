@@ -339,7 +339,25 @@ The first empirical round supports several parts of the project's thesis:
 
 At the same time, the current evidence does \emph{not} yet justify a strong claim that the calibration-aware method clearly dominates point-forecast scaling. The next iteration should therefore focus on improving burst-sensitive decision behavior rather than adding a more complicated forecasting model too early.
 
-One exploratory result already points in a plausible direction. A hybrid variant that combines app-specific calibration with a one-minute reactive guard reduces burst-only SLA violation from $0.7885$ to $0.6432$ while also lowering aggregate mean cost from $1.0383$ to $0.8625$. However, it raises mean oscillation from $0.0678$ to $0.1680$, which is too reactive to present as the main method. The takeaway is useful nonetheless: the bottleneck is increasingly in the decision layer, not in the point forecaster itself.
+\subsection{Hybrid Guard Ablation}
+To test whether the main bottleneck lies in the calibration layer or in the downstream decision rule, we evaluated the exploratory hybrid policy introduced in Section~\ref{sec:method}. The hybrid policy combines app-specific residual calibration with a short reactive guard that becomes active after a burst has partially revealed itself.
+
+\begin{table}[h]
+\centering
+\caption{Exploratory hybrid-guard ablation. The guarded variants improve burst-only SLA but do so by accepting much higher burst-time cost and oscillation.}
+\label{tab:hybrid-guard}
+\begin{tabular}{lccccc}
+\toprule
+Variant & Mean Cost & SLA Viol. & Oscillation & Burst SLA & Burst Osc. \\
+\midrule
+Risk-calibrated & 1.038 & 0.0115 & 0.0678 & 0.7885 & 0.0352 \\
+Hybrid guard ($\beta=0.75$) & 0.863 & 0.0117 & 0.1680 & 0.6432 & 2.5330 \\
+Hybrid guard ($\beta=1.0$) & 0.883 & 0.0114 & 0.1922 & 0.6167 & 3.3260 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:hybrid-guard} makes the trade-off explicit. The guarded variants materially improve burst-only SLA, and the milder setting with $\beta=0.75$ also lowers aggregate mean cost. However, both variants become much more oscillatory during bursts, and their burst-time provisioning cost rises sharply. This is why the hybrid policy is best read as a diagnostic ablation rather than as the final method: it confirms that once some burst information is revealed, the decision layer can recover a substantial part of the missed capacity, but the current mechanism is too blunt to serve as the main policy.
 
 \subsection{Capacity Proxy Ablation: Average vs Peak}
 We also tested a sharper capacity proxy based on per-minute peak concurrency. This is a natural alternative because it should be more sensitive to bursts than average concurrency. However, the first ablation shows that the peak proxy makes the task substantially harsher for all methods and does not currently improve the downstream behavior of the calibration-aware policy.
